@@ -4,50 +4,66 @@ import { ChatPromptTemplate } from "@langchain/core/prompts";
 import { StringOutputParser } from "@langchain/core/output_parsers";
 import { RunnableSequence } from "@langchain/core/runnables";
 
-// Access the environment variable
-const groqApiKey = import.meta.env.VITE_GROQ_API_KEY;
+const initializeChat = () => {
+  try {
+    const groqApiKey = import.meta.env.VITE_GROQ_API_KEY;
+    
+    if (!groqApiKey) {
+      throw new Error("GROQ API key not found in environment variables");
+    }
 
-if (!groqApiKey) {
-  throw new Error("Groq API key not found. Please set the GROQ_API_KEY environment variable.");
-}
+    const model = new ChatGroq({
+      apiKey: groqApiKey,
+      model: "mixtral-8x7b-32768",
+      temperature: 0,
+    });
 
-const model = new ChatGroq({
-  model: "mixtral-8x7b-32768",
-  temperature: 0,
-  headers: {
-    Authorization: `Bearer ${groqApiKey}`,
-  },
-});
+    const prompt = ChatPromptTemplate.fromMessages([
+      ["system", "You are a friendly and helpful library assistant..."],
+      ["human", "{input}"]
+    ]);
 
-const prompt = ChatPromptTemplate.fromMessages([
-  ["system", "You are a friendly and helpful library assistant. Your primary role is to assist users with all library-related queries. You can provide information about:- Available books and their locations- Library hours and services- Book recommendations- Library membership details- Academic resources- Study spaces and facilitiesRespond with enthusiasm and helpfulness, always maintaining a warm and professional tone. If a query is not related to the library, politely redirect the user and explain that you're specialized in library assistance. Your goal is to make every library interaction informative, pleasant, and efficient."],
-  ["human", "{input}"]
-]);
+    return RunnableSequence.from([
+      prompt,
+      model,
+      new StringOutputParser()
+    ]);
+  } catch (error) {
+    console.error("Error initializing chat:", error);
+    return null;
+  }
+};
 
-const chain = RunnableSequence.from([
-  prompt,
-  model,
-  new StringOutputParser()
-]);
+const chain = initializeChat();
 
 function Chatbot() {
   const [input, setInput] = useState("");
   const [response, setResponse] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState("");
 
   const handleInputChange = (e) => {
     setInput(e.target.value);
+    setError(""); // Clear any previous errors
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsLoading(true);
+    setError("");
+
+    if (!chain) {
+      setError("Chat system not properly initialized. Please check API key configuration.");
+      setIsLoading(false);
+      return;
+    }
+
     try {
       const result = await chain.invoke({ input });
       setResponse(result);
     } catch (error) {
       console.error("Error:", error);
-      setResponse("Sorry, something went wrong. Please try again.");
+      setError("Sorry, something went wrong. Please try again.");
     }
     setIsLoading(false);
   };
@@ -55,8 +71,11 @@ function Chatbot() {
   return (
     <div style={styles.chatContainer}>
       <div style={styles.chatBox}>
-        <div style={styles.responseBox}>{response ? `🤖 Chatbot: ${response}` : ""}</div>
-        {isLoading ? <div>Loading...</div> : null}
+        {error && <div style={styles.error}>{error}</div>}
+        <div style={styles.responseBox}>
+          {response ? `🤖 Chatbot: ${response}` : ""}
+        </div>
+        {isLoading && <div>Loading...</div>}
       </div>
       <form onSubmit={handleSubmit} style={styles.form}>
         <input
@@ -66,7 +85,9 @@ function Chatbot() {
           style={styles.input}
           placeholder="Ask me about the library..."
         />
-        <button type="submit" style={styles.button}>Send</button>
+        <button type="submit" style={styles.button} disabled={isLoading}>
+          Send
+        </button>
       </form>
     </div>
   );
@@ -114,6 +135,13 @@ const styles = {
     borderRadius: "5px",
     cursor: "pointer",
   },
+  error: {
+    color: '#ff4444',
+    marginBottom: '10px',
+    padding: '10px',
+    backgroundColor: '#ffe6e6',
+    borderRadius: '5px',
+  }
 };
 
 export default Chatbot;
